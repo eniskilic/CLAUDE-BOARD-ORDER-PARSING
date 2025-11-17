@@ -304,6 +304,10 @@ def clean_text(s: str) -> str:
 
 def extract_design_number(text: str) -> str:
     """Extract design number from the customization text."""
+    # Check for "No Engraving" first
+    if re.search(r"No\s*Engraving.*(?:Blank\s*Board)?", text, re.IGNORECASE):
+        return "NO_DESIGN"
+    
     design_match = re.search(r"Design\s*#?:?\s*Design\s*(\d+)", text, re.IGNORECASE)
     if design_match:
         return design_match.group(1)
@@ -358,7 +362,12 @@ def generate_manufacturing_labels(dataframe):
         
         c.setFont("Helvetica-Bold", 20)
         text_y = box_y + box_height / 2 - 0.1 * inch
-        c.drawCentredString(W / 2, text_y, f"DESIGN #{row['Design Number']}")
+        
+        # Display design number or "NO DESIGN / BLANK" for blank boards
+        if row['Design Number'] == "NO_DESIGN":
+            c.drawCentredString(W / 2, text_y, "NO DESIGN / BLANK BOARD")
+        else:
+            c.drawCentredString(W / 2, text_y, f"DESIGN #{row['Design Number']}")
         
         y = box_y - 0.3 * inch
 
@@ -849,7 +858,10 @@ if uploaded:
     with col_left:
         st.markdown("### 📐 Design Numbers")
         for design, count in design_counts.items():
-            st.markdown(f"**Design {design}:** {count} boards")
+            if design == "NO_DESIGN":
+                st.markdown(f"**No Design / Blank Boards:** {count} boards")
+            else:
+                st.markdown(f"**Design {design}:** {count} boards")
     
     with col_right:
         st.markdown("### 🔨 Engraving Types")
@@ -1012,8 +1024,11 @@ if uploaded:
         if design_order_counts or mixed_order_count > 0:
             st.markdown("### 📦 Available Design Groups:")
             
-            # Create columns for design buttons (max 3 per row)
-            designs_list = sorted(design_order_counts.keys())
+            # Separate NO_DESIGN from numbered designs
+            no_design_count = design_order_counts.pop("NO_DESIGN", 0)
+            
+            # Create columns for numbered design buttons (max 3 per row)
+            designs_list = sorted([d for d in design_order_counts.keys() if d.isdigit()], key=lambda x: int(x))
             num_cols = 3
             
             for i in range(0, len(designs_list), num_cols):
@@ -1052,6 +1067,37 @@ if uploaded:
                                             use_container_width=True,
                                             key=f"download_design_{design_num}"
                                         )
+            
+            # No Design / Blank Boards button
+            if no_design_count > 0:
+                st.markdown("### 🔲 Blank Boards:")
+                if st.button(
+                    f"🔲 No Design / Blank Boards ({no_design_count} orders)",
+                    use_container_width=True,
+                    key="no_design_merge"
+                ):
+                    with st.spinner("Merging blank board labels..."):
+                        shipping_labels_upload.seek(0)
+                        st.session_state.manufacturing_labels_buffer.seek(0)
+                        
+                        merged_pdf, num_orders, num_items = merge_labels_by_design(
+                            shipping_labels_upload,
+                            st.session_state.manufacturing_labels_buffer,
+                            df,
+                            target_design="NO_DESIGN",
+                            mixed_only=False
+                        )
+                        
+                        if merged_pdf:
+                            st.success(f"✅ Blank Boards: Merged {num_orders} orders ({num_items} items)")
+                            st.download_button(
+                                label="⬇️ Download Blank Board Labels",
+                                data=merged_pdf,
+                                file_name="No_Design_Blank_Boards.pdf",
+                                mime="application/pdf",
+                                use_container_width=True,
+                                key="download_no_design"
+                            )
             
             # Mixed design orders button
             if mixed_order_count > 0:
