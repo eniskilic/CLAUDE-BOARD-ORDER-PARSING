@@ -1,6 +1,6 @@
-streamlit==1.28.0
-pdfplumber==0.10.3
-pandas==2.1.1
-reportlab==4.0.5
-pypdf==3.17.0
-Pillow==10.0.1
+streamlit
+pdfplumber
+pandas
+reportlab
+pypdf
+Pillow
