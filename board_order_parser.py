@@ -561,12 +561,110 @@ def merge_shipping_and_manufacturing_labels(shipping_pdf_bytes, manufacturing_pd
         st.error(f"Error merging labels: {str(e)}")
         return None, 0, 0
 
+def merge_labels_by_design(shipping_pdf_bytes, manufacturing_pdf_bytes, order_dataframe, target_design=None, mixed_only=False):
+    """
+    Merge shipping and manufacturing labels grouped by design number.
+    
+    Args:
+        shipping_pdf_bytes: Shipping labels PDF
+        manufacturing_pdf_bytes: Manufacturing labels PDF
+        order_dataframe: DataFrame with all orders
+        target_design: Specific design number to merge (e.g., "1", "2", etc.)
+        mixed_only: If True, only merge orders with mixed designs
+    
+    Returns:
+        Merged PDF buffer, number of orders, number of items
+    """
+    try:
+        shipping_pdf = PdfReader(shipping_pdf_bytes)
+        manufacturing_pdf = PdfReader(manufacturing_pdf_bytes)
+        
+        # Identify pure vs mixed design orders
+        order_design_map = {}  # order_id -> list of design numbers
+        for order_id in order_dataframe['Order ID'].unique():
+            order_items = order_dataframe[order_dataframe['Order ID'] == order_id]
+            designs = order_items['Design Number'].unique().tolist()
+            order_design_map[order_id] = designs
+        
+        # Build list of orders in original order
+        seen_orders = []
+        for order_id in order_dataframe['Order ID']:
+            if order_id not in seen_orders:
+                seen_orders.append(order_id)
+        
+        # Filter orders based on target_design or mixed_only
+        filtered_orders = []
+        for order_id in seen_orders:
+            designs = order_design_map[order_id]
+            is_mixed = len(designs) > 1
+            
+            if mixed_only:
+                # Only include mixed design orders
+                if is_mixed:
+                    filtered_orders.append(order_id)
+            elif target_design:
+                # Only include pure orders with matching design
+                if not is_mixed and target_design in designs:
+                    filtered_orders.append(order_id)
+            else:
+                # Include all orders
+                filtered_orders.append(order_id)
+        
+        if not filtered_orders:
+            return None, 0, 0
+        
+        # Create mapping of order indices
+        order_to_shipping_idx = {}
+        order_to_mfg_indices = {}
+        
+        shipping_idx = 0
+        mfg_idx = 0
+        
+        for order_id in seen_orders:
+            order_to_shipping_idx[order_id] = shipping_idx
+            shipping_idx += 1
+            
+            # Get manufacturing label indices for this order
+            item_count = len(order_dataframe[order_dataframe['Order ID'] == order_id])
+            order_to_mfg_indices[order_id] = list(range(mfg_idx, mfg_idx + item_count))
+            mfg_idx += item_count
+        
+        # Create merged PDF for filtered orders
+        output_pdf = PdfWriter()
+        
+        for order_id in filtered_orders:
+            ship_idx = order_to_shipping_idx[order_id]
+            mfg_indices = order_to_mfg_indices[order_id]
+            
+            # Add shipping label
+            if ship_idx < len(shipping_pdf.pages):
+                output_pdf.add_page(shipping_pdf.pages[ship_idx])
+            
+            # Add manufacturing labels
+            for mfg_idx in mfg_indices:
+                if mfg_idx < len(manufacturing_pdf.pages):
+                    output_pdf.add_page(manufacturing_pdf.pages[mfg_idx])
+        
+        # Write to buffer
+        output_buffer = BytesIO()
+        output_pdf.write(output_buffer)
+        output_buffer.seek(0)
+        
+        # Calculate totals
+        total_items = sum(len(order_to_mfg_indices[order_id]) for order_id in filtered_orders)
+        
+        return output_buffer, len(filtered_orders), total_items
+        
+    except Exception as e:
+        st.error(f"Error merging labels by design: {str(e)}")
+        return None, 0, 0
+
 # --------------------------------------
 # SIDEBAR WITH FUNCTIONAL NAVIGATION
 # --------------------------------------
 with st.sidebar:
     st.markdown("# 🪵 Board Manager")
-    st.markdown("### Version 1.0 Dark")
+    st.markdown("### Version 1.1 Dark")
     st.markdown("---")
     
     st.markdown("#### 📋 Quick Navigation")
@@ -576,6 +674,7 @@ with st.sidebar:
     st.markdown('<a href="#design-breakdown" class="nav-link">🎨 Design Breakdown</a>', unsafe_allow_html=True)
     st.markdown('<a href="#generate-files" class="nav-link">📥 Generate Files</a>', unsafe_allow_html=True)
     st.markdown('<a href="#label-merge" class="nav-link">🔄 Label Merge</a>', unsafe_allow_html=True)
+    st.markdown('<a href="#design-merge" class="nav-link">🎨 Merge by Design</a>', unsafe_allow_html=True)
     
     st.markdown("---")
     
@@ -876,11 +975,129 @@ if uploaded:
     elif not shipping_labels_upload and st.session_state.manufacturing_labels_buffer:
         st.info("📤 Upload your shipping labels PDF above to enable merging")
 
+    # --------------------------------------
+    # NEW: Merge Labels by Design Section
+    # --------------------------------------
+    if shipping_labels_upload and st.session_state.manufacturing_labels_buffer:
+        st.markdown("---")
+        st.markdown('<a id="design-merge"></a>', unsafe_allow_html=True)
+        st.markdown("## 🎨 Merge Labels by Design")
+        
+        st.info("""
+        **Group and merge labels by design number:**
+        - Each design gets its own merged PDF
+        - Orders with mixed designs go into a separate PDF
+        - Perfect for organizing production by design
+        """)
+        
+        # Analyze orders to determine pure vs mixed designs
+        order_design_map = {}
+        for order_id in df['Order ID'].unique():
+            order_items = df[df['Order ID'] == order_id]
+            designs = order_items['Design Number'].unique().tolist()
+            order_design_map[order_id] = designs
+        
+        # Count pure design orders per design
+        design_order_counts = {}
+        mixed_order_count = 0
+        
+        for order_id, designs in order_design_map.items():
+            if len(designs) == 1:
+                design_num = designs[0]
+                design_order_counts[design_num] = design_order_counts.get(design_num, 0) + 1
+            else:
+                mixed_order_count += 1
+        
+        # Display buttons for each design
+        if design_order_counts or mixed_order_count > 0:
+            st.markdown("### 📦 Available Design Groups:")
+            
+            # Create columns for design buttons (max 3 per row)
+            designs_list = sorted(design_order_counts.keys())
+            num_cols = 3
+            
+            for i in range(0, len(designs_list), num_cols):
+                cols = st.columns(num_cols)
+                for j, col in enumerate(cols):
+                    if i + j < len(designs_list):
+                        design_num = designs_list[i + j]
+                        order_count = design_order_counts[design_num]
+                        
+                        with col:
+                            button_key = f"design_{design_num}_merge"
+                            if st.button(
+                                f"📐 Design {design_num} ({order_count} orders)",
+                                key=button_key,
+                                use_container_width=True
+                            ):
+                                with st.spinner(f"Merging Design {design_num} labels..."):
+                                    shipping_labels_upload.seek(0)
+                                    st.session_state.manufacturing_labels_buffer.seek(0)
+                                    
+                                    merged_pdf, num_orders, num_items = merge_labels_by_design(
+                                        shipping_labels_upload,
+                                        st.session_state.manufacturing_labels_buffer,
+                                        df,
+                                        target_design=design_num,
+                                        mixed_only=False
+                                    )
+                                    
+                                    if merged_pdf:
+                                        st.success(f"✅ Design {design_num}: Merged {num_orders} orders ({num_items} items)")
+                                        st.download_button(
+                                            label=f"⬇️ Download Design {design_num} Labels",
+                                            data=merged_pdf,
+                                            file_name=f"Design_{design_num}_Merged_Labels.pdf",
+                                            mime="application/pdf",
+                                            use_container_width=True,
+                                            key=f"download_design_{design_num}"
+                                        )
+            
+            # Mixed design orders button
+            if mixed_order_count > 0:
+                st.markdown("### 🔀 Mixed Design Orders:")
+                if st.button(
+                    f"🔀 Mixed Designs ({mixed_order_count} orders)",
+                    use_container_width=True,
+                    key="mixed_designs_merge"
+                ):
+                    with st.spinner("Merging mixed design labels..."):
+                        shipping_labels_upload.seek(0)
+                        st.session_state.manufacturing_labels_buffer.seek(0)
+                        
+                        merged_pdf, num_orders, num_items = merge_labels_by_design(
+                            shipping_labels_upload,
+                            st.session_state.manufacturing_labels_buffer,
+                            df,
+                            target_design=None,
+                            mixed_only=True
+                        )
+                        
+                        if merged_pdf:
+                            st.success(f"✅ Mixed Designs: Merged {num_orders} orders ({num_items} items)")
+                            
+                            # Show which orders are mixed
+                            with st.expander("ℹ️ View Mixed Design Orders"):
+                                for order_id, designs in order_design_map.items():
+                                    if len(designs) > 1:
+                                        buyer = df[df['Order ID'] == order_id]['Buyer Name'].iloc[0]
+                                        designs_str = ", ".join([f"Design {d}" for d in designs])
+                                        st.write(f"• {buyer} ({order_id}): {designs_str}")
+                            
+                            st.download_button(
+                                label="⬇️ Download Mixed Design Labels",
+                                data=merged_pdf,
+                                file_name="Mixed_Design_Orders.pdf",
+                                mime="application/pdf",
+                                use_container_width=True,
+                                key="download_mixed_designs"
+                            )
+
 # Footer
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #a0aec0; padding: 20px;'>
-    <p><strong>Charcuterie Board Order Manager v1.0 Dark</strong></p>
+    <p><strong>Charcuterie Board Order Manager v1.1 Dark</strong></p>
     <p>Professional board order processing & label generation system</p>
 </div>
 """, unsafe_allow_html=True)
