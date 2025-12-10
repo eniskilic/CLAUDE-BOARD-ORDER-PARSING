@@ -345,6 +345,16 @@ def generate_manufacturing_labels(dataframe):
         c.setFont("Helvetica-Bold", 14)
         c.drawString(left, y, f"Order ID: {row['Order ID']}")
         c.drawRightString(right, y, f"Qty: {row['Quantity']}")
+        
+        # --- NEW: Gift Wrap Indicator (Top Right) ---
+        if row['Gift Note'] == "YES":
+            c.saveState()
+            c.setFillColor(colors.red)
+            c.setFont("Helvetica-Bold", 12)
+            c.drawRightString(right, y - 0.25*inch, "🎁 GIFT WRAP")
+            c.restoreState()
+        # ---------------------------------------------
+
         y -= 0.25 * inch
         
         # Buyer and Date
@@ -414,11 +424,11 @@ def generate_manufacturing_labels(dataframe):
             c.drawString(left, y, f"Utensil Letter: {row['Utensil Letter']}")
             y -= 0.3 * inch
 
-        # Gift Note indicator
+        # Gift Note indicator (Original Warning)
         if row['Gift Note'] == "YES":
             c.setFont("Helvetica-Bold", 14)
             c.setFillColor(colors.red)
-            c.drawString(left, y, "⚠️ GIFT MESSAGE INCLUDED")
+            c.drawString(left, y, "⚠️ GIFT MESSAGE & WRAP INCLUDED")
             c.setFillColor(colors.black)
 
         c.showPage()
@@ -673,7 +683,7 @@ def merge_labels_by_design(shipping_pdf_bytes, manufacturing_pdf_bytes, order_da
 # --------------------------------------
 with st.sidebar:
     st.markdown("# 🪵 Board Manager")
-    st.markdown("### Version 1.1 Dark")
+    st.markdown("### Version 1.2 Dark")
     st.markdown("---")
     
     st.markdown("#### 📋 Quick Navigation")
@@ -691,7 +701,7 @@ with st.sidebar:
     st.markdown("✓ PDF Parsing")
     st.markdown("✓ Design-Specific CSVs")
     st.markdown("✓ Label Generation")
-    st.markdown("✓ Gift Messages")
+    st.markdown("✓ Gift Wrap Indicators")
     st.markdown("✓ Label Merging")
     
     st.markdown("---")
@@ -703,8 +713,7 @@ with st.sidebar:
 st.title("🪵 Charcuterie Board Order Manager")
 
 st.markdown("""
-**Professional board order processing & label generation system**  
-Parse Amazon PDFs • Generate design-specific CSVs • Create labels • Merge shipments
+**Professional board order processing & label generation system** Parse Amazon PDFs • Generate design-specific CSVs • Create labels • Merge shipments
 """)
 
 st.markdown("---")
@@ -776,8 +785,13 @@ if uploaded:
             utensil_match = re.search(r"Engraving Letter for (?:Cheese Knife Handles|Utensils):\s*([A-Z])", block, re.IGNORECASE)
             utensil_letter = utensil_match.group(1) if utensil_match else ""
 
-            # Check for gift note
-            gift_note = "YES" if re.search(r"Gift Note & Gift Bag:\s*Yes", block, re.IGNORECASE) else "NO"
+            # Check for gift note / gift wrap
+            # Updated Regex to catch "Gift Bag and Gift Note Please!" or "Yes" or "Wrap"
+            gift_indicator_match = re.search(r"Gift Note & Gift Bag:\s*(.*)", block, re.IGNORECASE)
+            gift_text_content = gift_indicator_match.group(1).lower() if gift_indicator_match else ""
+            
+            # True if it contains "gift bag", "wrap", or "yes"
+            gift_note = "YES" if any(x in gift_text_content for x in ["gift bag", "yes", "wrap", "gift note"]) and "no, thank you" not in gift_text_content else "NO"
 
             # Extract gift message
             gift_msg_match = re.search(
@@ -842,7 +856,7 @@ if uploaded:
     with col2:
         st.metric("Total Orders", total_orders)
     with col3:
-        st.metric("Gift Messages", gift_messages_needed)
+        st.metric("Gift Wraps", gift_messages_needed)
     with col4:
         st.metric("Unique Designs", unique_designs)
     
@@ -1143,7 +1157,7 @@ if uploaded:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #a0aec0; padding: 20px;'>
-    <p><strong>Charcuterie Board Order Manager v1.1 Dark</strong></p>
+    <p><strong>Charcuterie Board Order Manager v1.2 Dark</strong></p>
     <p>Professional board order processing & label generation system</p>
 </div>
 """, unsafe_allow_html=True)
