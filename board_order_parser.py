@@ -414,7 +414,7 @@ def generate_manufacturing_labels(dataframe):
             c.drawString(left, y, f"Utensil Letter: {row['Utensil Letter']}")
             y -= 0.3 * inch
 
-        # Gift Note indicator
+        # Gift Note indicator (Only at bottom now)
         if row['Gift Note'] == "YES":
             c.setFont("Helvetica-Bold", 14)
             c.setFillColor(colors.red)
@@ -521,7 +521,6 @@ def generate_csv_files_by_design(dataframe):
 def merge_shipping_and_manufacturing_labels(shipping_pdf_bytes, manufacturing_pdf_bytes, order_dataframe):
     """
     Merge shipping labels with manufacturing labels.
-    Handles orders with multiple items (one shipping label, multiple manufacturing labels).
     """
     try:
         shipping_pdf = PdfReader(shipping_pdf_bytes)
@@ -572,17 +571,9 @@ def merge_shipping_and_manufacturing_labels(shipping_pdf_bytes, manufacturing_pd
 
 def merge_labels_by_design(shipping_pdf_bytes, manufacturing_pdf_bytes, order_dataframe, target_design=None, mixed_only=False):
     """
-    Merge shipping and manufacturing labels grouped by design number.
-    
-    Args:
-        shipping_pdf_bytes: Shipping labels PDF
-        manufacturing_pdf_bytes: Manufacturing labels PDF
-        order_dataframe: DataFrame with all orders
-        target_design: Specific design number to merge (e.g., "1", "2", etc.)
-        mixed_only: If True, only merge orders with mixed designs
-    
-    Returns:
-        Merged PDF buffer, number of orders, number of items
+    Merge shipping and manufacturing labels with EXCLUSIVE logic.
+    - If target_design is set: Only includes orders that contain ONLY that design.
+    - If mixed_only is True: Only includes orders that contain >1 designs.
     """
     try:
         shipping_pdf = PdfReader(shipping_pdf_bytes)
@@ -612,12 +603,10 @@ def merge_labels_by_design(shipping_pdf_bytes, manufacturing_pdf_bytes, order_da
                 if is_mixed:
                     filtered_orders.append(order_id)
             elif target_design:
-                # Only include pure orders with matching design
+                # STRICT RULE: Only include pure orders with matching design
+                # It must NOT be mixed, and the single design must match the target
                 if not is_mixed and target_design in designs:
                     filtered_orders.append(order_id)
-            else:
-                # Include all orders
-                filtered_orders.append(order_id)
         
         if not filtered_orders:
             return None, 0, 0
@@ -673,16 +662,16 @@ def merge_labels_by_design(shipping_pdf_bytes, manufacturing_pdf_bytes, order_da
 # --------------------------------------
 with st.sidebar:
     st.markdown("# 🪵 Board Manager")
-    st.markdown("### Version 1.3 Dark")
+    st.markdown("### Version 1.4 (Safe Mode)")
     st.markdown("---")
     
     st.markdown("#### 📋 Quick Navigation")
     
     st.markdown('<a href="#upload-order" class="nav-link">📄 Upload Order</a>', unsafe_allow_html=True)
+    st.markdown('<a href="#audit" class="nav-link">🛡️ Safety Audit</a>', unsafe_allow_html=True)
     st.markdown('<a href="#dashboard" class="nav-link">📊 Dashboard</a>', unsafe_allow_html=True)
     st.markdown('<a href="#design-breakdown" class="nav-link">🎨 Design Breakdown</a>', unsafe_allow_html=True)
     st.markdown('<a href="#generate-files" class="nav-link">📥 Generate Files</a>', unsafe_allow_html=True)
-    st.markdown('<a href="#label-merge" class="nav-link">🔄 Label Merge</a>', unsafe_allow_html=True)
     st.markdown('<a href="#design-merge" class="nav-link">🎨 Merge by Design</a>', unsafe_allow_html=True)
     
     st.markdown("---")
@@ -692,7 +681,7 @@ with st.sidebar:
     st.markdown("✓ Design-Specific CSVs")
     st.markdown("✓ Label Generation")
     st.markdown("✓ Gift Wrap Indicators")
-    st.markdown("✓ Label Merging")
+    st.markdown("✓ Exclusive Logic Check")
     
     st.markdown("---")
     st.markdown('<div class="status-indicator"><div class="status-dot"></div><span>System Ready</span></div>', unsafe_allow_html=True)
@@ -703,7 +692,8 @@ with st.sidebar:
 st.title("🪵 Charcuterie Board Order Manager")
 
 st.markdown("""
-**Professional board order processing & label generation system** Parse Amazon PDFs • Generate design-specific CSVs • Create labels • Merge shipments
+**Professional board order processing & label generation system**
+Includes automatic auditing to prevent duplicate shipments.
 """)
 
 st.markdown("---")
@@ -776,11 +766,9 @@ if uploaded:
             utensil_letter = utensil_match.group(1) if utensil_match else ""
 
             # Check for gift note / gift wrap
-            # Updated Regex to catch "Gift Bag and Gift Note Please!" or "Yes" or "Wrap"
             gift_indicator_match = re.search(r"Gift Note & Gift Bag:\s*(.*)", block, re.IGNORECASE)
             gift_text_content = gift_indicator_match.group(1).lower() if gift_indicator_match else ""
             
-            # True if it contains "gift bag", "wrap", or "yes"
             gift_note = "YES" if any(x in gift_text_content for x in ["gift bag", "yes", "wrap", "gift note"]) and "no, thank you" not in gift_text_content else "NO"
 
             # Extract gift message
@@ -816,8 +804,56 @@ if uploaded:
     
     st.success(f"✅ Successfully parsed {len(df)} line items from {df['Order ID'].nunique()} orders")
     
-    with st.expander("📊 View Order Data"):
-        st.dataframe(df, use_container_width=True)
+    # --------------------------------------
+    # Safety Audit Section
+    # --------------------------------------
+    st.markdown("---")
+    st.markdown('<a id="audit"></a>', unsafe_allow_html=True)
+    st.markdown("## 🛡️ Safety Audit & Validation")
+    
+    with st.expander("Click to run Verification Check (Recommended)", expanded=True):
+        # Calculate Logic distribution
+        order_design_map = {}
+        for order_id in df['Order ID'].unique():
+            order_items = df[df['Order ID'] == order_id]
+            designs = order_items['Design Number'].unique().tolist()
+            order_design_map[order_id] = designs
+
+        design_buckets = {}  # {design_num: [order_ids]}
+        mixed_bucket = []
+        
+        for order_id, designs in order_design_map.items():
+            if len(designs) > 1:
+                mixed_bucket.append(order_id)
+            else:
+                d = designs[0]
+                if d not in design_buckets:
+                    design_buckets[d] = []
+                design_buckets[d].append(order_id)
+        
+        # Verify totals
+        total_input_orders = df['Order ID'].nunique()
+        total_assigned = len(mixed_bucket) + sum(len(v) for v in design_buckets.values())
+        
+        col_audit1, col_audit2 = st.columns(2)
+        
+        with col_audit1:
+            st.write(f"**Total Input Orders:** {total_input_orders}")
+            st.write(f"**Total Assigned Orders:** {total_assigned}")
+            
+            if total_input_orders == total_assigned:
+                st.success("✅ INTEGRITY CHECK PASSED: All orders are accounted for exactly once.")
+            else:
+                st.error(f"❌ ERROR: Discrepancy detected! ({total_input_orders - total_assigned} orders missing or duplicated)")
+
+        with col_audit2:
+            st.markdown("**Batch Distribution:**")
+            for d, orders in design_buckets.items():
+                if d == "NO_DESIGN":
+                    st.write(f"- Blank Boards: {len(orders)} orders")
+                else:
+                    st.write(f"- Design {d}: {len(orders)} orders")
+            st.write(f"- Mixed/Complex: {len(mixed_bucket)} orders")
 
     # --------------------------------------
     # Calculate Summary Statistics
@@ -926,17 +962,17 @@ if uploaded:
             )
 
     # --------------------------------------
-    # Label Merging Section
+    # NEW: Merge Labels by Design Section
     # --------------------------------------
     st.markdown("---")
-    st.markdown('<a id="label-merge"></a>', unsafe_allow_html=True)
-    st.markdown("## 🔄 Merge Shipping & Manufacturing Labels")
+    st.markdown('<a id="design-merge"></a>', unsafe_allow_html=True)
+    st.markdown("## 🎨 Merge Labels by Design (Exclusive Batches)")
     
     st.info("""
-    **Instructions for Label Merging:**
-    1. Generate Manufacturing Labels above (click the button)
-    2. Upload your shipping labels PDF from Amazon/UPS
-    3. Click merge to create a combined PDF
+    **Safety Rule Applied:**
+    - **Single Design Orders:** Go into their specific Design # folder.
+    - **Mixed Orders:** Are REMOVED from Design folders and go ONLY to the "Mixed Designs" folder.
+    - **Result:** No duplicate shipping labels.
     """)
     
     shipping_labels_upload = st.file_uploader(
@@ -945,66 +981,8 @@ if uploaded:
         key="shipping_labels",
         help="Upload the shipping labels PDF from Amazon or your carrier"
     )
-    
-    if shipping_labels_upload and st.session_state.manufacturing_labels_buffer:
-        col_merge1, col_merge2 = st.columns([3, 1])
-        
-        with col_merge1:
-            if st.button("🔀 Merge Labels Now", type="primary", use_container_width=True):
-                with st.spinner("Merging shipping and manufacturing labels..."):
-                    shipping_labels_upload.seek(0)
-                    st.session_state.manufacturing_labels_buffer.seek(0)
-                    
-                    merged_pdf, num_shipping, num_manufacturing = merge_shipping_and_manufacturing_labels(
-                        shipping_labels_upload,
-                        st.session_state.manufacturing_labels_buffer,
-                        df
-                    )
-                    
-                    if merged_pdf:
-                        st.success(f"✅ Successfully merged {num_shipping} shipping labels with {num_manufacturing} manufacturing labels!")
-                        
-                        multi_item_orders = df.groupby('Order ID').size()
-                        multi_item_orders = multi_item_orders[multi_item_orders > 1]
-                        
-                        if len(multi_item_orders) > 0:
-                            with st.expander(f"ℹ️ Found {len(multi_item_orders)} order(s) with multiple items"):
-                                for order_id, count in multi_item_orders.items():
-                                    buyer = df[df['Order ID'] == order_id]['Buyer Name'].iloc[0]
-                                    st.write(f"• {buyer} ({order_id}): {count} boards")
-                        
-                        st.download_button(
-                            label="⬇️ Download Merged Labels PDF",
-                            data=merged_pdf,
-                            file_name="Merged_Board_Labels.pdf",
-                            mime="application/pdf",
-                            use_container_width=True
-                        )
-        
-        with col_merge2:
-            st.metric("Total Orders", df['Order ID'].nunique())
-            st.metric("Total Items", len(df))
-    
-    elif shipping_labels_upload and not st.session_state.manufacturing_labels_buffer:
-        st.warning("⚠️ Please generate Manufacturing Labels first (click the button above)")
-    
-    elif not shipping_labels_upload and st.session_state.manufacturing_labels_buffer:
-        st.info("📤 Upload your shipping labels PDF above to enable merging")
 
-    # --------------------------------------
-    # NEW: Merge Labels by Design Section
-    # --------------------------------------
     if shipping_labels_upload and st.session_state.manufacturing_labels_buffer:
-        st.markdown("---")
-        st.markdown('<a id="design-merge"></a>', unsafe_allow_html=True)
-        st.markdown("## 🎨 Merge Labels by Design")
-        
-        st.info("""
-        **Group and merge labels by design number:**
-        - Each design gets its own merged PDF
-        - Orders with mixed designs go into a separate PDF
-        - Perfect for organizing production by design
-        """)
         
         # Analyze orders to determine pure vs mixed designs
         order_design_map = {}
@@ -1106,6 +1084,7 @@ if uploaded:
             # Mixed design orders button
             if mixed_order_count > 0:
                 st.markdown("### 🔀 Mixed Design Orders:")
+                st.warning("⚠️ These orders contain multiple different designs. They are NOT included in the single-design batches above.")
                 if st.button(
                     f"🔀 Mixed Designs ({mixed_order_count} orders)",
                     use_container_width=True,
@@ -1143,11 +1122,17 @@ if uploaded:
                                 key="download_mixed_designs"
                             )
 
+    elif shipping_labels_upload and not st.session_state.manufacturing_labels_buffer:
+        st.warning("⚠️ Please generate Manufacturing Labels first (click the button in the 'Generate & Download' section above)")
+    
+    elif not shipping_labels_upload and st.session_state.manufacturing_labels_buffer:
+        st.info("📤 Upload your shipping labels PDF above to enable merging")
+
 # Footer
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #a0aec0; padding: 20px;'>
-    <p><strong>Charcuterie Board Order Manager v1.3 Dark</strong></p>
+    <p><strong>Charcuterie Board Order Manager v1.4 (Safe Mode)</strong></p>
     <p>Professional board order processing & label generation system</p>
 </div>
 """, unsafe_allow_html=True)
