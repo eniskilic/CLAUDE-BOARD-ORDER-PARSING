@@ -786,12 +786,12 @@ if uploaded:
             utensil_letter = utensil_match.group(1) if utensil_match else ""
 
             # -----------------------------------------------------------
-            # UPDATED GIFT LOGIC (Multi-line + specific stop phrase)
+            # UPDATED GIFT LOGIC (Multi-line + Robust Stop Phrase)
             # -----------------------------------------------------------
-            # Captures everything between "Gift Note & Gift Bag:" 
-            # and "Please CHECK for mistakes and spellings.:Double Checked!"
+            # Logic: Capture everything between "Gift Note & Gift Bag:" and "Please CHECK for mistakes"
+            # (?=\s*Please CHECK for mistakes|\Z) means: Stop if you see "Please CHECK..." OR if you hit the end of the text block.
             gift_match = re.search(
-                r"Gift Note & Gift Bag:\s*([\s\S]*?)(?=\s*Please CHECK for mistakes and spellings.:Double Checked!)", 
+                r"Gift Note & Gift Bag:\s*([\s\S]*?)(?=\s*Please CHECK for mistakes|\Z)", 
                 block, 
                 re.IGNORECASE
             )
