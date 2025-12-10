@@ -345,16 +345,6 @@ def generate_manufacturing_labels(dataframe):
         c.setFont("Helvetica-Bold", 14)
         c.drawString(left, y, f"Order ID: {row['Order ID']}")
         c.drawRightString(right, y, f"Qty: {row['Quantity']}")
-        
-        # --- NEW: Gift Wrap Indicator (Top Right) ---
-        if row['Gift Note'] == "YES":
-            c.saveState()
-            c.setFillColor(colors.red)
-            c.setFont("Helvetica-Bold", 12)
-            c.drawRightString(right, y - 0.25*inch, "🎁 GIFT WRAP")
-            c.restoreState()
-        # ---------------------------------------------
-
         y -= 0.25 * inch
         
         # Buyer and Date
@@ -424,7 +414,7 @@ def generate_manufacturing_labels(dataframe):
             c.drawString(left, y, f"Utensil Letter: {row['Utensil Letter']}")
             y -= 0.3 * inch
 
-        # Gift Note indicator (Original Warning)
+        # Gift Note indicator
         if row['Gift Note'] == "YES":
             c.setFont("Helvetica-Bold", 14)
             c.setFillColor(colors.red)
@@ -683,7 +673,7 @@ def merge_labels_by_design(shipping_pdf_bytes, manufacturing_pdf_bytes, order_da
 # --------------------------------------
 with st.sidebar:
     st.markdown("# 🪵 Board Manager")
-    st.markdown("### Version 1.2 Dark")
+    st.markdown("### Version 1.3 Dark")
     st.markdown("---")
     
     st.markdown("#### 📋 Quick Navigation")
@@ -1157,7 +1147,7 @@ if uploaded:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #a0aec0; padding: 20px;'>
-    <p><strong>Charcuterie Board Order Manager v1.2 Dark</strong></p>
+    <p><strong>Charcuterie Board Order Manager v1.3 Dark</strong></p>
     <p>Professional board order processing & label generation system</p>
 </div>
 """, unsafe_allow_html=True)
