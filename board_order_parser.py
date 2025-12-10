@@ -785,21 +785,33 @@ if uploaded:
             utensil_match = re.search(r"Engraving Letter for (?:Cheese Knife Handles|Utensils):\s*([A-Z])", block, re.IGNORECASE)
             utensil_letter = utensil_match.group(1) if utensil_match else ""
 
-            # Check for gift note / gift wrap
-            # Updated Regex to catch "Gift Bag and Gift Note Please!" or "Yes" or "Wrap"
-            gift_indicator_match = re.search(r"Gift Note & Gift Bag:\s*(.*)", block, re.IGNORECASE)
-            gift_text_content = gift_indicator_match.group(1).lower() if gift_indicator_match else ""
-            
-            # True if it contains "gift bag", "wrap", or "yes"
-            gift_note = "YES" if any(x in gift_text_content for x in ["gift bag", "yes", "wrap", "gift note"]) and "no, thank you" not in gift_text_content else "NO"
-
-            # Extract gift message
-            gift_msg_match = re.search(
-                r"Gift Card Note:\s*([\s\S]*?)(?=\n(?:Please CHECK|Grand total|Returning your item|Visit|Quantity|Order Totals|$))",
-                block,
+            # -----------------------------------------------------------
+            # UPDATED GIFT LOGIC (Multi-line + specific stop phrase)
+            # -----------------------------------------------------------
+            # Captures everything between "Gift Note & Gift Bag:" 
+            # and "Please CHECK for mistakes and spellings.:Double Checked!"
+            gift_match = re.search(
+                r"Gift Note & Gift Bag:\s*([\s\S]*?)(?=\s*Please CHECK for mistakes and spellings.:Double Checked!)", 
+                block, 
                 re.IGNORECASE
             )
-            gift_message = clean_text(gift_msg_match.group(1)) if gift_msg_match else ""
+
+            if gift_match:
+                # The content captured
+                raw_msg = gift_match.group(1).strip()
+                cleaned_msg = clean_text(raw_msg)
+                
+                # Basic validation: If the message is just "No" or empty, treat as no gift
+                if cleaned_msg and cleaned_msg.lower() not in ['no', 'no thank you', 'none']:
+                    gift_message = cleaned_msg
+                    gift_note = "YES"
+                else:
+                    gift_message = ""
+                    gift_note = "NO"
+            else:
+                gift_message = ""
+                gift_note = "NO"
+            # -----------------------------------------------------------
 
             records.append({
                 "Order ID": order_id,
